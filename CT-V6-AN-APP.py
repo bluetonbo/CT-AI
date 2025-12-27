@@ -6,7 +6,7 @@ from sklearn.linear_model import Ridge
 from sklearn.preprocessing import OrdinalEncoder
 
 # --- 1. 페이지 설정 ---
-st.set_page_config(page_title="AI 사출 CT 분석 - 파일 업로드", layout="centered")
+st.set_page_config(page_title="AI 사출 CT 분석 시스템", layout="centered")
 
 # --- 2. AI 엔진 클래스 ---
 class CT_Ensemble_Engine:
@@ -20,15 +20,11 @@ class CT_Ensemble_Engine:
 
     def train(self, df):
         try:
-            # 모든 컬럼명 대문자 및 공백 제거
             df.columns = [str(c).strip().upper() for c in df.columns]
-            
-            # 필요한 컬럼 확인 (사용자 엑셀 구조 기준)
             target_col = 'POINCT'
             past_nom_col = 'POMFCT'
             feature_cols = self.cat_vars + [past_nom_col]
             
-            # 유효 데이터 필터링
             data = df[feature_cols + [target_col]].dropna()
             
             if len(data) < 2:
@@ -59,10 +55,9 @@ class CT_Ensemble_Engine:
         return res
 
 # --- 3. 웹 UI ---
-st.title("🏭 AI 사출 CT 정밀 분석 (파일 업로드형)")
+st.title("🏭 AI 사출 정밀 예상 CT 시스템")
 st.write("엑셀 파일을 업로드하면 AI가 실측 데이터를 학습하여 정밀 CT를 예측합니다.")
 
-# 파일 업로드 컴포넌트
 uploaded_file = st.file_uploader("학습용 엑셀 파일을 선택하세요 (xlsx)", type=['xlsx'])
 
 if uploaded_file is not None:
@@ -82,7 +77,6 @@ if uploaded_file is not None:
             
             col1, col2 = st.columns(2)
             with col1:
-                # 엑셀에 있는 MA 목록을 자동으로 가져옴
                 ma_list = sorted([str(x).strip() for x in df_past['MA'].dropna().unique()])
                 ma = st.selectbox("기계 사양 (MA)", ma_list)
                 sz = st.selectbox("사이즈 (SZ)", ["S", "M", "L"])
@@ -102,12 +96,14 @@ if uploaded_file is not None:
                     st.subheader("STEP 2. AI 예측 결과 (NOPRECT)")
                     
                     gap = result - nomfct
-                    st.metric(label="최종 예상 CT", value=f"{result:.2f} s", delta=f"{gap:+.2f} s (해석 대비 보정치)")
-                    st.balloons()
+                    # metric으로 깔끔하게 결과 표시
+                    st.metric(label="최종 예상 CT (NOPRECT)", value=f"{result:.2f} s", delta=f"{gap:+.2f} s (보정치)")
+                    st.info("이론치와 실제 데이터 사이의 오차를 보정한 최종 결과입니다.")
+                    # 풍선 날라가는 코드(st.balloons) 삭제 완료!
         else:
             st.error(status)
             
     except Exception as e:
         st.error(f"엑셀 파일을 읽는 중 오류가 발생했습니다: {e}")
 else:
-    st.info("좌측 상단이나 중앙의 업로드 버튼을 눌러 'CT-INPUT-V6.xlsx' 파일을 선택해 주세요.")
+    st.info("엑셀 파일을 업로드해 주세요.")
