@@ -1,13 +1,12 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import OrdinalEncoder
 
 # --- 1. 페이지 설정 ---
-st.set_page_config(page_title="AI 사출 CT 정밀 분석", layout="centered")
+st.set_page_config(page_title="AI 사출 CT 분석 - 파일 업로드", layout="centered")
 
 # --- 2. AI 엔진 클래스 ---
 class CT_Ensemble_Engine:
@@ -21,28 +20,33 @@ class CT_Ensemble_Engine:
 
     def train(self, df):
         try:
-            # 컬럼명 정리
+            # 모든 컬럼명 대문자 및 공백 제거
             df.columns = [str(c).strip().upper() for c in df.columns]
-            target_col = 'POINCT'   # 실측
-            past_nom_col = 'POMFCT' # 과거 해석
+            
+            # 필요한 컬럼 확인 (사용자 엑셀 구조 기준)
+            target_col = 'POINCT'
+            past_nom_col = 'POMFCT'
             feature_cols = self.cat_vars + [past_nom_col]
             
-            # 학습 데이터 준비
+            # 유효 데이터 필터링
             data = df[feature_cols + [target_col]].dropna()
+            
+            if len(data) < 2:
+                return "학습 데이터가 너무 부족합니다. (최소 2행 이상 필요)"
+
             X = data[feature_cols]
             y = data[target_col]
             
             X_enc = X.copy()
             X_enc[self.cat_vars] = self.encoder.fit_transform(X[self.cat_vars].astype(str))
             
-            # 앙상블 학습
             self.m1.fit(X_enc, y)
             self.m2.fit(X_enc, y)
             self.m3.fit(X_enc, y)
             self.is_ready = True
             return "SUCCESS"
         except Exception as e:
-            return f"학습 오류: {str(e)}"
+            return f"학습 오류: 데이터 구조를 확인하세요. ({str(e)})"
 
     def predict(self, inputs):
         if not self.is_ready: return None
@@ -54,29 +58,31 @@ class CT_Ensemble_Engine:
         res = (self.m1.predict(df_in)[0] + self.m2.predict(df_in)[0] + self.m3.predict(df_in)[0]) / 3
         return res
 
-# --- 3. 웹 화면(UI) 구성 ---
-st.title("🏭 AI 사출 정밀 예상 CT 시스템")
-st.markdown("---")
+# --- 3. 웹 UI ---
+st.title("🏭 AI 사출 CT 정밀 분석 (파일 업로드형)")
+st.write("엑셀 파일을 업로드하면 AI가 실측 데이터를 학습하여 정밀 CT를 예측합니다.")
 
-# 엑셀 파일 로드 (GitHub 저장소에 함께 있는 경우)
-FILE_NAME = 'CT-INPUT-V6.xlsx'
+# 파일 업로드 컴포넌트
+uploaded_file = st.file_uploader("학습용 엑셀 파일을 선택하세요 (xlsx)", type=['xlsx'])
 
-if os.path.exists(FILE_NAME):
+if uploaded_file is not None:
     try:
-        # 데이터 로드 (Past Data 시트, 헤더 2행)
-        df_past = pd.read_excel(FILE_NAME, sheet_name='Past Data', header=1)
+        # 데이터 로드 (Past Data 시트, 헤더는 2행 기준)
+        df_past = pd.read_excel(uploaded_file, sheet_name='Past Data', header=1)
         
         engine = CT_Ensemble_Engine()
-        status = engine.train(df_past)
+        with st.spinner('데이터 분석 및 AI 학습 중...'):
+            status = engine.train(df_past)
 
         if status == "SUCCESS":
-            st.sidebar.success("✅ AI 학습 데이터 로드 완료")
+            st.success(f"✅ 학습 완료! (총 {len(df_past)}개의 이력 데이터 활용)")
             
-            # 입력 섹션
-            st.subheader("STEP 1. 공정 및 해석 조건 입력")
+            st.divider()
+            st.subheader("STEP 1. 현재 공정 조건 입력")
+            
             col1, col2 = st.columns(2)
-            
             with col1:
+                # 엑셀에 있는 MA 목록을 자동으로 가져옴
                 ma_list = sorted([str(x).strip() for x in df_past['MA'].dropna().unique()])
                 ma = st.selectbox("기계 사양 (MA)", ma_list)
                 sz = st.selectbox("사이즈 (SZ)", ["S", "M", "L"])
@@ -87,22 +93,21 @@ if os.path.exists(FILE_NAME):
                 dp = st.selectbox("깊이 (DP)", ["DS", "DM", "DL"])
                 nomfct = st.number_input("현재 성형 해석 CT (NOMFCT)", value=200.0, step=0.1)
 
-            st.write("")
-            if st.button("AI 정밀 분석 실행 (NOPRECT)"):
+            if st.button("AI 분석 실행 (NOPRECT)"):
                 inputs = {'MA': ma, 'SZ': sz, 'IN': in_val, 'TH': th, 'DP': dp, 'NOMFCT': nomfct}
                 result = engine.predict(inputs)
                 
                 if result:
-                    st.markdown("---")
-                    st.subheader("STEP 2. AI 분석 결과 (NOPRECT)")
+                    st.divider()
+                    st.subheader("STEP 2. AI 예측 결과 (NOPRECT)")
                     
                     gap = result - nomfct
-                    st.metric(label="최종 예상 CT", value=f"{result:.2f} s", delta=f"{gap:+.2f} s (보정)")
-                    
-                    st.success(f"과거 {len(df_past)}건의 이력을 분석하여 도출된 결과입니다.")
+                    st.metric(label="최종 예상 CT", value=f"{result:.2f} s", delta=f"{gap:+.2f} s (해석 대비 보정치)")
+                    st.balloons()
         else:
-            st.error(f"데이터 학습 실패: {status}")
+            st.error(status)
+            
     except Exception as e:
-        st.error(f"엑셀 파일 읽기 오류: {e}")
+        st.error(f"엑셀 파일을 읽는 중 오류가 발생했습니다: {e}")
 else:
-    st.error(f"파일을 찾을 수 없습니다: {FILE_NAME}. GitHub에 엑셀 파일을 함께 올려주세요.")
+    st.info("좌측 상단이나 중앙의 업로드 버튼을 눌러 'CT-INPUT-V6.xlsx' 파일을 선택해 주세요.")
